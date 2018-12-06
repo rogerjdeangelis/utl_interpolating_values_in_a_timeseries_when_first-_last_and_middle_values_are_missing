@@ -2,6 +2,33 @@ Interpolating values in a timeseries when some first,last and middle values are 
 
 I carried forward and backward values to fill in missing mutiple first and last readings
 
+Recent update:
+Two improved solutions by Mark on end (much simpler)
+Keintz, Mark" <mkeintz@WHARTON.UPENN.EDU>
+
+By all means, do a double dow, but stop not only at last.id, but also when not missing(price).
+And then take advantage of a conditional lag queue update at those stopping points.
+
+At each stop in the first dow below:
+
+1 Get the lagged value of price (i.e. the most recent non missing price) as prior_price.
+  But if the corresponding lagged value of ID does not match current id, then assign
+  prior_price = current price.  This will accommodate carry backwards at the start of each id.
+
+2 Generate next_price=current price.  But if the do loop stop is due to last.id,
+  and current price is missing then assign next_price=prior_price, which
+  takes care of carrying forward at the end of an ID.
+
+s Reread the _N observations and get a weighted average
+  of prior_price and next_price, with the weights proporitional
+  to the distances from records containing prior_price and next_price .
+
+
+The trick” here is to conditionally generate lagged values of ID and PRICE.
+The lag (remember it’s a queue) is only updated when a valid price is in hand (or last.id=1).
+
+Previous Solutions
+
     Two Algorithms
 
          1. WPS/PROC R or IML/R (full solution)
@@ -321,5 +348,76 @@ data wrk.partialwps(keep=productid price finPrice);
   call missing(val1st, valLst, been_there, finPrice, location);
 run;quit;
 ');
+
+
+*__  __            _
+|  \/  | __ _ _ __| | __
+| |\/| |/ _` | '__| |/ /
+| |  | | (_| | |  |   <
+|_|  |_|\__,_|_|  |_|\_\
+
+;
+Two improved solutions by Mark on end (much simpler)
+Keintz, Mark" <mkeintz@WHARTON.UPENN.EDU>
+
+By all means, do a double dow, but stop not only at last.id, but also when not missing(price).
+And then take advantage of a conditional lag queue update at those stopping points.
+
+
+At each stop in the first dow below:
+
+1 Get the lagged value of price (i.e. the most recent non missing price) as prior_price.
+  But if the corresponding lagged value of ID does not match current id, then assign
+  prior_price = current price.  This will accommodate carry backwards at the start of each id.
+
+2 Generate next_price=current price.  But if the do loop stop is due to last.id,
+  and current price is missing then assign next_price=prior_price, which
+  takes care of carrying forward at the end of an ID.
+
+s Reread the _N observations and get a weighted average
+  of prior_price and next_price, with the weights proporitional
+  to the distances from records containing prior_price and next_price .
+
+
+The trick” here is to conditionally generate lagged values of ID and PRICE.
+The lag (remember it’s a queue) is only updated when a valid price is in hand (or last.id=1).
+
+
+data want (drop=_:);
+  if 0 then set have;
+  do _N=1 by 1 until (last.id or not missing(price));
+    set have;
+    by id;
+  end;
+  _prior_price=ifn(id=lag(id),lag(price),price);
+  _next_price=ifn(price=. & last.id,_prior_price,price);
+  do _J=1 to _N;
+    set have;
+    if price=. then price= (1-(_J/_N))*_prior_price + (_J/_N)*_next_price;
+    output;
+  end;
+
+run;
+
+And instead of a classic double dow structure, you can have conditional single dows.
+I.e. read data outside of a do loop until a desired condition.
+The a execute a DO loop to reread the same observations, with an embedded SET and OUTPUT:
+
+data want (drop=_:);
+  set have;
+  by id;
+
+  if last.id or not missing(price);
+  _prior_price=ifn(id=lag(id),lag(price),price);
+  _next_price=ifn(price=. & last.id,_prior_price,price);
+  _N=coalesce(dif(_n_),_n_);
+  do _J=1 to _N;
+    set have;
+    if price=. then price= (1-(_J/_N))*_prior_price + (_J/_N)*_next_price;
+    output;
+  end;
+
+run;
+
 
 
